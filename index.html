@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Método MS</title>
+  <title>Método MS - Login</title>
   <style>
     :root {
       --primary: #4f46e5;
@@ -14,12 +14,7 @@
       --radius: 1rem;
     }
 
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
+    * { box-sizing: border-box; }
     body {
       background-color: var(--bg);
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -35,16 +30,23 @@
       background-color: var(--card-bg);
       border-radius: var(--radius);
       padding: 2.5rem;
-      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.07);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.07);
       text-align: center;
-      max-width: 400px;
+      max-width: 420px;
       width: 100%;
-      animation: fadeIn 0.8s ease-in-out;
+      animation: fadeIn 0.6s ease-in-out;
     }
 
-    h1 {
-      font-size: 2rem;
-      margin-bottom: 1.5rem;
+    h1 { font-size: 1.75rem; margin-bottom: 1rem; }
+    p.lead { margin-bottom: 1rem; color: #6b7280; }
+
+    input {
+      width: 100%;
+      padding: 0.75rem;
+      border-radius: 0.5rem;
+      border: 1px solid #e5e7eb;
+      margin-bottom: 0.75rem;
+      font-size: 1rem;
     }
 
     .btn {
@@ -55,41 +57,148 @@
       padding: 0.75rem 1.5rem;
       border-radius: 0.75rem;
       font-weight: bold;
-      transition: background-color 0.3s ease;
+      transition: background-color 0.2s ease;
+      cursor: pointer;
+      width: 100%;
     }
+    .btn:hover { background-color: var(--primary-dark); }
 
-    .btn:hover {
-      background-color: var(--primary-dark);
-    }
+    .meta { margin-top: 0.75rem; font-size: 0.9rem; color: #6b7280; }
+    .error { color: #ef4444; margin-top: 0.5rem; font-size: 0.95rem; }
+    .success { color: #059669; margin-top: 0.5rem; font-size: 0.95rem; }
 
-    @keyframes fadeIn {
-      from {
-        opacity: 0;
-        transform: translateY(20px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
+    @keyframes fadeIn { from { opacity:0; transform: translateY(12px);} to { opacity:1; transform: translateY(0);} }
 
-    @media (max-width: 480px) {
-      h1 {
-        font-size: 1.5rem;
-      }
-
-      .btn {
-        width: 100%;
-        padding: 1rem;
-        font-size: 1rem;
-      }
-    }
+    @media (max-width:480px){ .card{ padding:1.25rem;} h1{ font-size:1.25rem;} }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>Aula 1</h1>
-    <a href="fundamentos_do_marketing_digital.html" class="btn">Acessar Conteúdo</a>
+    <h1>Entrar / Registrar</h1>
+    <p class="lead">Use o mesmo formulário para criar conta (primeira vez) ou entrar.</p>
+
+    <input type="email" id="email" placeholder="seu@exemplo.com" autocomplete="username" />
+    <input type="password" id="senha" placeholder="Senha" autocomplete="current-password" />
+    <button class="btn" id="btnEntrar">Entrar</button>
+
+    <p id="mensagem" class="error" aria-live="polite"></p>
+    <p class="meta">Ao criar conta a senha ficará salva no navegador (localStorage). Este é um sistema simples sem backend.</p>
   </div>
+
+  <script>
+    // Chaves
+    const TOKEN_KEY = 'ms_login_token_v2'; // armazena objeto JSON {email, ownerTabId, ts}
+    const HEARTBEAT_INTERVAL_MS = 1500; // intervalo de atualização do heartbeat
+    const HEARTBEAT_TTL_MS = 5000; // se timestamp do token for mais antigo que isso, considera livre
+
+    // Identificador desta aba (sessionStorage é separado por aba)
+    let tabId = sessionStorage.getItem('ms_tab_id');
+    if (!tabId) {
+      // gera id simples
+      tabId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+      sessionStorage.setItem('ms_tab_id', tabId);
+    }
+
+    const emailInput = document.getElementById('email');
+    const senhaInput = document.getElementById('senha');
+    const msgEl = document.getElementById('mensagem');
+    const btn = document.getElementById('btnEntrar');
+
+    function showError(text){ msgEl.className = 'error'; msgEl.textContent = text; }
+    function showSuccess(text){ msgEl.className = 'success'; msgEl.textContent = text; }
+    function clearMsg(){ msgEl.textContent = ''; }
+
+    function getToken(){
+      try { return JSON.parse(localStorage.getItem(TOKEN_KEY)); } catch(e){ return null; }
+    }
+
+    function setToken(obj){
+      obj.ts = Date.now();
+      localStorage.setItem(TOKEN_KEY, JSON.stringify(obj));
+    }
+
+    function removeToken(){
+      const t = getToken();
+      if (t && t.ownerTabId === tabId) localStorage.removeItem(TOKEN_KEY);
+    }
+
+    // Heartbeat: atualiza timestamp do token se for dono
+    let heartbeatTimer = null;
+    function startHeartbeat(){
+      stopHeartbeat();
+      heartbeatTimer = setInterval(()=>{
+        const t = getToken();
+        if (t && t.ownerTabId === tabId){ t.ts = Date.now(); localStorage.setItem(TOKEN_KEY, JSON.stringify(t)); }
+      }, HEARTBEAT_INTERVAL_MS);
+    }
+    function stopHeartbeat(){ if (heartbeatTimer) clearInterval(heartbeatTimer); heartbeatTimer = null; }
+
+    // Verifica se já existe login em outra aba ativa
+    function estaLogadoEmOutraAba(){
+      const t = getToken();
+      if (!t) return false;
+      if (t.ownerTabId === tabId) return false; // sou eu
+      // se o timestamp for recente (<= TTL), considera bloqueado
+      if ((Date.now() - (t.ts || 0)) <= HEARTBEAT_TTL_MS) return true;
+      // senão considera token expirado e limpa
+      localStorage.removeItem(TOKEN_KEY);
+      return false;
+    }
+
+    // Ao carregar, checar estado
+    window.addEventListener('load', ()=>{
+      if (estaLogadoEmOutraAba()){
+        showError('Login já ativo em outra guia. Feche-a ou faça logout nela para entrar aqui.');
+        btn.disabled = true;
+      }
+    });
+
+    // Reagir a mudanças no localStorage (outras abas)
+    window.addEventListener('storage', (e)=>{
+      if (e.key === TOKEN_KEY){
+        // token criado/atualizado/removido noutra aba
+        if (estaLogadoEmOutraAba()){
+          showError('Login já ativo em outra guia.'); btn.disabled = true; stopHeartbeat();
+        } else {
+          clearMsg(); btn.disabled = false;
+        }
+      }
+    });
+
+    // Função principal de login/sign-up
+    btn.addEventListener('click', ()=>{
+      clearMsg();
+      const email = (emailInput.value || '').trim().toLowerCase();
+      const senha = (senhaInput.value || '').trim();
+
+      if (!email || !email.includes('@')){ showError('Digite um e-mail válido.'); return; }
+      if (!senha){ showError('Digite a senha.'); return; }
+
+      if (estaLogadoEmOutraAba()){ showError('Login já ativo em outra guia.'); return; }
+
+      // chave onde a senha do usuário é guardada (simples, localStorage)
+      const pwdKey = 'ms_pwd_' + email;
+      const senhaSalva = localStorage.getItem(pwdKey);
+
+      if (!senhaSalva){
+        // sign-up automático
+        try { localStorage.setItem(pwdKey, senha); showSuccess('Conta criada. Entrando...'); }
+        catch(e){ showError('Erro ao salvar a conta no navegador.'); return; }
+      } else if (senhaSalva !== senha){
+        showError('Senha incorreta.'); return;
+      }
+
+      // criar token com ownerTabId para impedir outras abas
+      setToken({ email, ownerTabId: tabId });
+      startHeartbeat();
+
+      // redirecionar (mantemos o token para controlar sessão)
+      setTimeout(()=>{ window.location.href = 'fundamentos_do_marketing_digital.html'; }, 450);
+    });
+
+    // Ao fechar/recarrregar a aba, remover token se esta aba for a dona
+    window.addEventListener('beforeunload', ()=>{ removeToken(); stopHeartbeat(); });
+
+  </script>
 </body>
 </html>
